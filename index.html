@@ -166,6 +166,11 @@
   .row.checked {
     background: var(--accent-bg);
   }
+  .row.focus-active {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: 6px;
+  }
   .row.hidden {
     display: none;
   }
@@ -227,6 +232,121 @@
     color: var(--text-dim);
     font-size: 0.88rem;
   }
+
+  /* Focus player */
+  .focus-player {
+    max-width: 1200px;
+    margin: 20px auto 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+  }
+  .focus-player .video-wrap {
+    flex-shrink: 0;
+  }
+  .focus-player video {
+    width: 420px;
+    height: 236px;
+    min-width: 200px;
+    min-height: 112px;
+    max-width: 100%;
+    background: #000;
+    border-radius: 8px;
+    resize: both;
+    overflow: hidden;
+    display: block;
+  }
+  .focus-player .resize-hint {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-top: 4px;
+    text-align: right;
+  }
+  .focus-player .focus-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .focus-player .focus-position {
+    font-size: 0.82rem;
+    color: var(--accent);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .focus-player .focus-caption {
+    font-size: 1.05rem;
+    line-height: 1.4;
+  }
+  .focus-player .focus-visual-caption {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+  .focus-player .focus-subinfo {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+  }
+  .focus-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .nav-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 20px;
+    font-size: 0.95rem;
+  }
+  .nav-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .nav-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .focus-select-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 2px solid var(--border);
+  }
+  .focus-select-label.checked {
+    border-color: var(--accent);
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+  .focus-select-label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    accent-color: var(--accent);
+  }
+  .kbd-hint {
+    font-size: 0.76rem;
+    color: var(--text-dim);
+  }
+  .kbd-hint kbd {
+    background: var(--accent-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: inherit;
+    font-size: 0.72rem;
+  }
 </style>
 </head>
 <body>
@@ -251,6 +371,28 @@
 
 <div class="tabs" id="tabs"></div>
 
+<div class="focus-player" id="focusPlayer">
+  <div class="video-wrap">
+    <video id="focusVideo" controls preload="metadata"></video>
+    <div class="resize-hint">drag corner to resize ↘</div>
+  </div>
+  <div class="focus-info">
+    <div class="focus-position" id="focusPosition"></div>
+    <div class="focus-caption" id="focusCaption"></div>
+    <div class="focus-visual-caption" id="focusVisualCaption"></div>
+    <div class="focus-subinfo" id="focusSubinfo"></div>
+    <div class="focus-nav">
+      <button class="nav-btn" id="prevBtn">← Prev</button>
+      <label class="focus-select-label" id="focusSelectLabel">
+        <input type="checkbox" id="focusCheckbox">
+        Select this clip
+      </label>
+      <button class="nav-btn" id="nextBtn">Next →</button>
+    </div>
+    <div class="kbd-hint">Keyboard: <kbd>←</kbd> <kbd>→</kbd> to move, <kbd>Space</kbd> to select</div>
+  </div>
+</div>
+
 <main id="app"></main>
 
 <script>
@@ -260,6 +402,7 @@ const TABS = [
   { key: "task1", title: "Task 1 — Playful Pottery" },
   { key: "task2", title: "Task 2 — Mud Witch" },
   { key: "broll_only", title: "Other / B-roll" },
+  { key: "__selected__", title: "★ Selected" },
 ];
 
 const tabsEl = document.getElementById("tabs");
@@ -267,9 +410,31 @@ const app = document.getElementById("app");
 const selectedCountEl = document.getElementById("selectedCount");
 const searchInput = document.getElementById("searchInput");
 const sortSelectedBtn = document.getElementById("sortSelectedBtn");
+const focusVideo = document.getElementById("focusVideo");
+const focusPosition = document.getElementById("focusPosition");
+const focusCaption = document.getElementById("focusCaption");
+const focusVisualCaption = document.getElementById("focusVisualCaption");
+const focusSubinfo = document.getElementById("focusSubinfo");
+const focusCheckbox = document.getElementById("focusCheckbox");
+const focusSelectLabel = document.getElementById("focusSelectLabel");
+const prevBtn = document.getElementById("prevBtn");
+const nextBtn = document.getElementById("nextBtn");
 
 let activeTab = TABS[0].key;
 let sortSelectedFirst = false;
+const selectedIndices = new Set();
+let focusIndex = 0; // position within the current tab's visible clip list
+
+function clipsForTab(key) {
+  if (key === "__selected__") {
+    return CLIPS.filter(c => selectedIndices.has(c.index))
+      .slice()
+      .sort((a, b) => a.videoName.localeCompare(b.videoName) || a.start - b.start);
+  }
+  return CLIPS.filter(c => c.tasks.includes(key))
+    .slice()
+    .sort((a, b) => a.videoName.localeCompare(b.videoName) || a.start - b.start);
+}
 
 function formatDuration(totalSeconds) {
   const s = Math.round(totalSeconds);
@@ -279,18 +444,12 @@ function formatDuration(totalSeconds) {
 }
 
 function updateCount() {
-  const checkedRows = Array.from(document.querySelectorAll('.row'))
-    .filter(row => row.querySelector('input[type="checkbox"]').checked);
-  const seen = new Set();
   let totalSeconds = 0;
-  for (const row of checkedRows) {
-    const idx = Number(row.dataset.clipIndex);
-    if (seen.has(idx)) continue;
-    seen.add(idx);
+  for (const idx of selectedIndices) {
     const clip = CLIPS.find(c => c.index === idx);
     totalSeconds += clip.end - clip.start;
   }
-  selectedCountEl.textContent = `${seen.size} selected · ${formatDuration(totalSeconds)} total`;
+  selectedCountEl.textContent = `${selectedIndices.size} selected · ${formatDuration(totalSeconds)} total`;
 }
 
 function searchableText(clip) {
@@ -299,18 +458,46 @@ function searchableText(clip) {
     .toLowerCase();
 }
 
+function setClipSelected(idx, selected) {
+  if (selected) selectedIndices.add(idx);
+  else selectedIndices.delete(idx);
+
+  document.querySelectorAll(`.row[data-clip-index="${idx}"]`).forEach(row => {
+    row.classList.toggle("checked", selected);
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (cb) cb.checked = selected;
+  });
+
+  if (getFocusClips()[focusIndex] && getFocusClips()[focusIndex].index === idx) {
+    focusCheckbox.checked = selected;
+    focusSelectLabel.classList.toggle("checked", selected);
+  }
+
+  updateCount();
+  if (sortSelectedFirst) {
+    document.querySelectorAll(".list").forEach(applySort);
+  }
+  if (activeTab === "__selected__") {
+    renderPanels();
+    updateFocusPlayer();
+  }
+}
+
 function renderTabs() {
   tabsEl.innerHTML = "";
   TABS.forEach(({ key, title }) => {
-    const clips = CLIPS.filter(c => c.tasks.includes(key));
-    if (clips.length === 0) return;
+    const clips = clipsForTab(key);
+    if (key !== "__selected__" && clips.length === 0) return;
     const btn = document.createElement("button");
     btn.className = "tab-btn" + (key === activeTab ? " active" : "");
     btn.textContent = `${title} (${clips.length})`;
     btn.addEventListener("click", () => {
       activeTab = key;
+      focusIndex = 0;
       renderTabs();
-      renderPanels();
+      showActivePanel();
+      applyFilter();
+      updateFocusPlayer();
     });
     tabsEl.appendChild(btn);
   });
@@ -318,15 +505,14 @@ function renderTabs() {
 
 function buildRow(clip) {
   const row = document.createElement("label");
-  row.className = "row";
+  row.className = "row" + (selectedIndices.has(clip.index) ? " checked" : "");
   row.dataset.clipIndex = clip.index;
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
+  checkbox.checked = selectedIndices.has(clip.index);
   checkbox.addEventListener("change", () => {
-    row.classList.toggle("checked", checkbox.checked);
-    updateCount();
-    if (sortSelectedFirst) applySort(row.closest(".list"));
+    setClipSelected(clip.index, checkbox.checked);
   });
 
   const video = document.createElement("video");
@@ -353,6 +539,19 @@ function buildRow(clip) {
   row.appendChild(checkbox);
   row.appendChild(video);
   row.appendChild(info);
+
+  row.addEventListener("click", (e) => {
+    if (e.target.tagName === "VIDEO" || e.target.closest("video")) return;
+    if (e.target.tagName === "INPUT") return;
+    const clips = getFocusClips();
+    const pos = clips.findIndex(c => c.index === clip.index);
+    if (pos !== -1) {
+      e.preventDefault();
+      focusIndex = pos;
+      updateFocusPlayer();
+    }
+  });
+
   return row;
 }
 
@@ -390,13 +589,17 @@ function applyFilter() {
   });
 }
 
+function showActivePanel() {
+  document.querySelectorAll(".tab-panel").forEach(panel => {
+    panel.classList.toggle("active", panel.dataset.tabKey === activeTab);
+  });
+}
+
 function renderPanels() {
   app.innerHTML = "";
   TABS.forEach(({ key, title }) => {
-    const clips = CLIPS.filter(c => c.tasks.includes(key))
-      .slice()
-      .sort((a, b) => a.videoName.localeCompare(b.videoName) || a.start - b.start);
-    if (clips.length === 0) return;
+    const clips = clipsForTab(key);
+    if (key !== "__selected__" && clips.length === 0) return;
 
     const panel = document.createElement("div");
     panel.className = "tab-panel" + (key === activeTab ? " active" : "");
@@ -409,8 +612,15 @@ function renderPanels() {
 
     const list = document.createElement("div");
     list.className = "list";
-    clips.forEach(clip => list.appendChild(buildRow(clip)));
-    section.appendChild(list);
+    if (clips.length === 0 && key === "__selected__") {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "No clips selected yet. Check clips in the other tabs to add them here.";
+      section.appendChild(empty);
+    } else {
+      clips.forEach(clip => list.appendChild(buildRow(clip)));
+      section.appendChild(list);
+    }
 
     panel.appendChild(section);
     app.appendChild(panel);
@@ -421,20 +631,72 @@ function renderPanels() {
   applyFilter();
 }
 
+function getFocusClips() {
+  return clipsForTab(activeTab);
+}
+
+function updateFocusPlayer() {
+  const clips = getFocusClips();
+  if (clips.length === 0) {
+    document.getElementById("focusPlayer").style.display = "none";
+    return;
+  }
+  document.getElementById("focusPlayer").style.display = "";
+  if (focusIndex >= clips.length) focusIndex = clips.length - 1;
+  if (focusIndex < 0) focusIndex = 0;
+  const clip = clips[focusIndex];
+
+  if (!focusVideo.src.endsWith(clip.file)) {
+    focusVideo.src = clip.file;
+  }
+  focusPosition.textContent = `Now playing: Clip ${focusIndex + 1} of ${clips.length} — ${clip.videoName}`;
+  focusCaption.textContent = clip.text;
+  focusVisualCaption.textContent = clip.visualCaption || "";
+  const kindClass = clip.kind === "interview" ? "kind-tag interview" : "kind-tag";
+  focusSubinfo.innerHTML = `${clip.videoName} · ${clip.start.toFixed(1)}s–${clip.end.toFixed(1)}s <span class="${kindClass}">${clip.kind}</span>`;
+  focusCheckbox.checked = selectedIndices.has(clip.index);
+  focusSelectLabel.classList.toggle("checked", focusCheckbox.checked);
+  prevBtn.disabled = focusIndex === 0;
+  nextBtn.disabled = focusIndex === clips.length - 1;
+
+  document.querySelectorAll(".row.focus-active").forEach(r => r.classList.remove("focus-active"));
+  const activeRow = document.querySelector(`.tab-panel.active .row[data-clip-index="${clip.index}"]`);
+  if (activeRow) activeRow.classList.add("focus-active");
+}
+
+function stepFocus(delta) {
+  const clips = getFocusClips();
+  if (clips.length === 0) return;
+  focusIndex = Math.min(clips.length - 1, Math.max(0, focusIndex + delta));
+  updateFocusPlayer();
+}
+
+prevBtn.addEventListener("click", () => stepFocus(-1));
+nextBtn.addEventListener("click", () => stepFocus(1));
+
+focusCheckbox.addEventListener("change", () => {
+  const clips = getFocusClips();
+  const clip = clips[focusIndex];
+  if (clip) setClipSelected(clip.index, focusCheckbox.checked);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (e.key === "ArrowRight") { stepFocus(1); }
+  else if (e.key === "ArrowLeft") { stepFocus(-1); }
+  else if (e.key === " ") {
+    e.preventDefault();
+    focusCheckbox.checked = !focusCheckbox.checked;
+    focusCheckbox.dispatchEvent(new Event("change"));
+  }
+});
+
 document.getElementById("selectAllBtn").addEventListener("click", () => {
-  document.querySelectorAll(".tab-panel.active input[type=\"checkbox\"]").forEach(cb => {
-    cb.checked = true;
-    cb.closest(".row").classList.add("checked");
-  });
-  updateCount();
+  clipsForTab(activeTab).forEach(clip => setClipSelected(clip.index, true));
 });
 
 document.getElementById("selectNoneBtn").addEventListener("click", () => {
-  document.querySelectorAll(".tab-panel.active input[type=\"checkbox\"]").forEach(cb => {
-    cb.checked = false;
-    cb.closest(".row").classList.remove("checked");
-  });
-  updateCount();
+  clipsForTab(activeTab).forEach(clip => setClipSelected(clip.index, false));
 });
 
 sortSelectedBtn.addEventListener("click", () => {
@@ -448,29 +710,23 @@ sortSelectedBtn.addEventListener("click", () => {
 searchInput.addEventListener("input", applyFilter);
 
 document.getElementById("exportBtn").addEventListener("click", () => {
-  const checkedRows = Array.from(document.querySelectorAll('.row'))
-    .filter(row => row.querySelector('input[type="checkbox"]').checked);
-
-  if (checkedRows.length === 0) {
+  if (selectedIndices.size === 0) {
     alert("No clips selected.");
     return;
   }
 
-  const seen = new Set();
-  const lines = [];
-  for (const row of checkedRows) {
-    const idx = Number(row.dataset.clipIndex);
-    if (seen.has(idx)) continue;
-    seen.add(idx);
-    const clip = CLIPS.find(c => c.index === idx);
-    lines.push(JSON.stringify({
-      videoName: clip.videoName,
-      start: clip.start,
-      end: clip.end,
-      text: clip.text,
-      kind: clip.kind,
-    }));
-  }
+  const lines = Array.from(selectedIndices)
+    .sort((a, b) => a - b)
+    .map(idx => {
+      const clip = CLIPS.find(c => c.index === idx);
+      return JSON.stringify({
+        videoName: clip.videoName,
+        start: clip.start,
+        end: clip.end,
+        text: clip.text,
+        kind: clip.kind,
+      });
+    });
 
   const blob = new Blob([lines.join("\n") + "\n"], { type: "application/jsonl" });
   const url = URL.createObjectURL(blob);
@@ -485,6 +741,7 @@ document.getElementById("exportBtn").addEventListener("click", () => {
 
 renderTabs();
 renderPanels();
+updateFocusPlayer();
 </script>
 
 </body>
